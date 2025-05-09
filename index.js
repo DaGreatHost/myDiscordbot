@@ -18,9 +18,9 @@ const client = new Client({
 const config = {
   serverInviteLink: 'https://discord.gg/K5E9yRVr', // Ang server link mo
   requiredShares: 3, // Ilang beses kailangang ibahagi ng users ang link
-  verificationChannelId: 'VERIFICATION_CHANNEL_ID', // Palitan mo ito ng ID ng verification channel mo
-  verifiedRoleId: 'VERIFIED_ROLE_ID', // Palitan mo ito ng ID ng verified role mo
-  welcomeChannelId: 'WELCOME_CHANNEL_ID' // Palitan mo ito ng ID ng welcome channel mo
+  verificationChannelId: '1370259139153887252', // Palitan mo ito ng ID ng verification channel mo
+  verifiedRoleId: '1370259899350782024', // Palitan mo ito ng ID ng verified role mo
+  welcomeChannelId: '1370265673455898706' // Palitan mo ito ng ID ng welcome channel mo
 };
 
 // Database para i-track ang user shares (sa production app, gumamit ng proper database)
