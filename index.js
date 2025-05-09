@@ -1,6 +1,7 @@
-// Discord Verification Bot - Kailangan ibahagi ng users ang server link ng 3 beses
-// Gumagamit ng Discord.js v14
-const { Client, GatewayIntentBits, PermissionFlagsBits, Events, EmbedBuilder } = require('discord.js');
+// Discord Verification Bot - With Interactive Buttons
+// Using Discord.js v14
+const { Client, GatewayIntentBits, PermissionFlagsBits, Events, EmbedBuilder, 
+  ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 require('dotenv').config();
 
 // Create a new client instance
@@ -16,82 +17,254 @@ const client = new Client({
 
 // Configuration
 const config = {
-  serverInviteLink: 'https://discord.gg/K5E9yRVr', // Ang server link mo
-  requiredShares: 3, // Ilang beses kailangang ibahagi ng users ang link
-  verificationChannelId: '1370259139153887252', // Palitan mo ito ng ID ng verification channel mo
-  verifiedRoleId: '1370259899350782024', // Palitan mo ito ng ID ng verified role mo
-  welcomeChannelId: '1370265673455898706' // Palitan mo ito ng ID ng welcome channel mo
+  serverInviteLink: 'https://discord.gg/K5E9yRVr', // Your server link
+  requiredShares: 3, // How many times users need to share the link
+  verificationChannelId: '1370259139153887252', // Replace with your verification channel ID
+  verifiedRoleId: '1370259899350782024', // Replace with your verified role ID
+  welcomeChannelId: '1370265673455898706', // Replace with your welcome channel ID
+  cooldownTime: 60000 // Cooldown in milliseconds (1 minute) between shares to prevent spam
 };
 
-// Database para i-track ang user shares (sa production app, gumamit ng proper database)
+// Database to track user shares (in a production app, use a proper database)
 const userShares = new Map();
+const userCooldowns = new Map();
 
 // Bot ready event
 client.once(Events.ClientReady, () => {
   console.log(`Logged in as ${client.user.tag}`);
-  console.log('Verification bot is ready!');
+  console.log('Verification bot with interactive buttons is ready!');
 });
 
-// Kapag may bagong miyembro na sumali sa server
+// When a new member joins the server
 client.on(Events.GuildMemberAdd, async (member) => {
   try {
-    // Magpadala ng welcome message at instructions sa verification channel
+    // Send welcome message and instructions to verification channel
     const verificationChannel = member.guild.channels.cache.get(config.verificationChannelId);
     
     if (verificationChannel) {
-      const embed = new EmbedBuilder()
-        .setColor(0x0099FF)
-        .setTitle('Welcome sa Server!')
-        .setDescription(`Welcome, ${member.user.username}! Para magkaroon ng full access sa server na ito, kailangan mong ibahagi ang invite link namin **${config.requiredShares} beses** sa iba.`)
-        .addFields(
-          { name: 'Mga Instructions', value: '1. Kopyahin ang server invite link sa ibaba\n2. Ibahagi ito sa mga kaibigan o sa ibang communities\n3. Magpadala ng screenshots ng iyong shares dito\n4. Kapag na-verify ka na, makakakuha ka na ng full access sa server!' },
-          { name: 'Server Invite Link', value: config.serverInviteLink }
-        )
-        .setTimestamp();
-      
-      await verificationChannel.send({ content: `<@${member.id}>`, embeds: [embed] });
+      await sendVerificationMessage(member, verificationChannel);
     }
     
-    // I-initialize ang user sa tracking system
+    // Initialize user in tracking system
     userShares.set(member.id, 0);
     
   } catch (error) {
-    console.error('Error sa pag-handle ng bagong miyembro:', error);
+    console.error('Error handling new member:', error);
   }
 });
 
-// I-process ang mga messages sa verification channel
+// Function to send verification message with button
+async function sendVerificationMessage(member, channel) {
+  const userId = member.id;
+  const currentShares = userShares.get(userId) || 0;
+  
+  const embed = new EmbedBuilder()
+    .setColor(0x0099FF)
+    .setTitle('Welcome sa Server!')
+    .setDescription(`Welcome, ${member.user.username}! Para magkaroon ng full access sa server na ito, kailangan mong ibahagi ang invite link namin **${config.requiredShares} beses** sa iba.`)
+    .addFields(
+      { name: 'Mga Instructions', value: '1. Click ang "Share Link" button sa ibaba\n2. Ibahagi ito sa mga kaibigan o sa ibang communities\n3. Click ulit ang button pagkatapos ibahagi\n4. Kapag na-verify ka na, makakakuha ka na ng full access sa server!' },
+      { name: 'Server Invite Link', value: config.serverInviteLink },
+      { name: 'Progress', value: `${currentShares}/${config.requiredShares} shares` }
+    )
+    .setTimestamp();
+  
+  // Create buttons
+  const row = new ActionRowBuilder()
+    .addComponents(
+      new ButtonBuilder()
+        .setCustomId(`share_${userId}`)
+        .setLabel(`Share Link (${currentShares}/${config.requiredShares})`)
+        .setStyle(ButtonStyle.Primary)
+        .setEmoji('🔗'),
+      new ButtonBuilder()
+        .setCustomId(`manual_verify_${userId}`)
+        .setLabel('I already shared (Show screenshot)')
+        .setStyle(ButtonStyle.Secondary)
+    );
+  
+  await channel.send({ 
+    content: `<@${userId}>`, 
+    embeds: [embed],
+    components: [row]
+  });
+}
+
+// Update progress for a user
+async function updateVerificationProgress(interaction, userId) {
+  try {
+    // Get current share count for user
+    const currentShares = userShares.get(userId) || 0;
+    const newShareCount = currentShares + 1;
+    
+    // Check cooldown
+    const lastShareTime = userCooldowns.get(userId) || 0;
+    const now = Date.now();
+    
+    if (now - lastShareTime < config.cooldownTime) {
+      const remainingTime = Math.ceil((config.cooldownTime - (now - lastShareTime)) / 1000);
+      return await interaction.reply({ 
+        content: `Masyado kang mabilis mag-share! Maghintay ka ng ${remainingTime} seconds bago mag-share ulit.`,
+        ephemeral: true
+      });
+    }
+    
+    // Update share count
+    userShares.set(userId, newShareCount);
+    userCooldowns.set(userId, now);
+    
+    if (newShareCount >= config.requiredShares) {
+      // User has met the requirement, give them access
+      const member = interaction.guild.members.cache.get(userId);
+      if (member) {
+        // Add the verified role
+        await member.roles.add(config.verifiedRoleId);
+        
+        // Send success message
+        const successEmbed = new EmbedBuilder()
+          .setColor(0x00FF00)
+          .setTitle('Verification Complete!')
+          .setDescription(`Congratulations ${member.user.username}! Matagumpay kang na-verify at mayroon ka na ngayong full access sa server.`)
+          .setTimestamp();
+        
+        await interaction.update({ 
+          embeds: [successEmbed],
+          components: [] // Remove buttons after verification
+        });
+        
+        // Send welcome message to welcome channel
+        const welcomeChannel = interaction.guild.channels.cache.get(config.welcomeChannelId);
+        if (welcomeChannel) {
+          await welcomeChannel.send(`Welcome sa server, <@${userId}>! Salamat sa pagtulong sa pag-grow ng community namin.`);
+        }
+      }
+    } else {
+      // Update user on their progress
+      const progressEmbed = new EmbedBuilder()
+        .setColor(0xFFA500)
+        .setTitle('Verification Progress')
+        .setDescription(`Salamat ${interaction.user.username}! Naibahagi mo na ang aming server link ${newShareCount}/${config.requiredShares} beses.`)
+        .addFields(
+          { name: 'Natitira', value: `Ibahagi mo pa ng ${config.requiredShares - newShareCount} beses para ma-verify.` }
+        )
+        .setTimestamp();
+      
+      // Update button with new count
+      const row = new ActionRowBuilder()
+        .addComponents(
+          new ButtonBuilder()
+            .setCustomId(`share_${userId}`)
+            .setLabel(`Share Link (${newShareCount}/${config.requiredShares})`)
+            .setStyle(ButtonStyle.Primary)
+            .setEmoji('🔗'),
+          new ButtonBuilder()
+            .setCustomId(`manual_verify_${userId}`)
+            .setLabel('I already shared (Show screenshot)')
+            .setStyle(ButtonStyle.Secondary)
+        );
+      
+      await interaction.update({ 
+        embeds: [progressEmbed],
+        components: [row]
+      });
+    }
+  } catch (error) {
+    console.error('Error updating verification progress:', error);
+    await interaction.reply({ 
+      content: 'May error na nangyari. Please try again.',
+      ephemeral: true
+    });
+  }
+}
+
+// Handle button interactions
+client.on(Events.InteractionCreate, async (interaction) => {
+  if (!interaction.isButton()) return;
+  
+  const customId = interaction.customId;
+  
+  // Handle share button
+  if (customId.startsWith('share_')) {
+    const userId = customId.split('_')[1];
+    
+    // Only allow the owner of the button to use it
+    if (interaction.user.id !== userId) {
+      return await interaction.reply({ 
+        content: 'Hindi mo pwedeng gamitin ang button na ito dahil hindi ito para sa iyo.',
+        ephemeral: true
+      });
+    }
+    
+    // First, reply with the server invite link for easy copying
+    await interaction.reply({ 
+      content: `Ito ang invite link na pwede mong i-share: ${config.serverInviteLink}\n\nPagkatapos ibahagi, click ulit ang button para ma-update ang progress mo.`,
+      ephemeral: true
+    });
+    
+    // Update the verification progress
+    await updateVerificationProgress(interaction, userId);
+  }
+  
+  // Handle manual verification button (for screenshot method)
+  if (customId.startsWith('manual_verify_')) {
+    const userId = customId.split('_')[2];
+    
+    // Only allow the owner of the button to use it
+    if (interaction.user.id !== userId) {
+      return await interaction.reply({ 
+        content: 'Hindi mo pwedeng gamitin ang button na ito dahil hindi ito para sa iyo.',
+        ephemeral: true
+      });
+    }
+    
+    await interaction.reply({ 
+      content: 'Mag-upload ng screenshot ng pagshare mo ng invite link sa ibang community o sa kaibigan mo dito sa channel na ito.',
+      ephemeral: true
+    });
+  }
+});
+
+// Process messages in verification channel for manual verification (screenshots)
 client.on(Events.MessageCreate, async (message) => {
-  // I-ignore ang bot messages
+  // Ignore bot messages
   if (message.author.bot) return;
   
-  // I-process lang ang mga messages sa verification channel
+  // Only process messages in verification channel
   if (message.channel.id !== config.verificationChannelId) return;
   
-  // I-check kung may image/screenshot ang message
+  // Check if message has an image/screenshot
   const hasImage = message.attachments.size > 0 && 
     message.attachments.some(attachment => 
       attachment.contentType?.startsWith('image/'));
   
-  // I-check kung ang message ay naglalaman ng server link o may image (screenshot)
-  if (message.content.includes(config.serverInviteLink) || hasImage) {
-    // Kunin ang current share count para sa user
+  if (hasImage) {
+    // Get current share count for user
     const userId = message.author.id;
     const currentShares = userShares.get(userId) || 0;
     const newShareCount = currentShares + 1;
     
-    // I-update ang share count
+    // Check cooldown
+    const lastShareTime = userCooldowns.get(userId) || 0;
+    const now = Date.now();
+    
+    if (now - lastShareTime < config.cooldownTime) {
+      const remainingTime = Math.ceil((config.cooldownTime - (now - lastShareTime)) / 1000);
+      return await message.reply(`Masyado kang mabilis mag-share! Maghintay ka ng ${remainingTime} seconds bago mag-share ulit.`);
+    }
+    
+    // Update share count
     userShares.set(userId, newShareCount);
+    userCooldowns.set(userId, now);
     
     if (newShareCount >= config.requiredShares) {
-      // Natugunan na ng user ang requirement, bigyan siya ng access
+      // User has met the requirement, give them access
       try {
         const member = message.guild.members.cache.get(userId);
         if (member) {
-          // I-add ang verified role
+          // Add the verified role
           await member.roles.add(config.verifiedRoleId);
           
-          // Magpadala ng success message
+          // Send success message
           const successEmbed = new EmbedBuilder()
             .setColor(0x00FF00)
             .setTitle('Verification Complete!')
@@ -100,17 +273,17 @@ client.on(Events.MessageCreate, async (message) => {
           
           await message.reply({ embeds: [successEmbed] });
           
-          // Magpadala ng welcome message sa welcome channel
+          // Send welcome message to welcome channel
           const welcomeChannel = message.guild.channels.cache.get(config.welcomeChannelId);
           if (welcomeChannel) {
             await welcomeChannel.send(`Welcome sa server, <@${userId}>! Salamat sa pagtulong sa pag-grow ng community namin.`);
           }
         }
       } catch (error) {
-        console.error('Error sa pagbibigay ng access sa verified user:', error);
+        console.error('Error giving access to verified user:', error);
       }
     } else {
-      // I-update ang user sa kanyang progress
+      // Update user on their progress
       const progressEmbed = new EmbedBuilder()
         .setColor(0xFFA500)
         .setTitle('Verification Progress')
@@ -125,9 +298,9 @@ client.on(Events.MessageCreate, async (message) => {
   }
 });
 
-// Admin commands para sa pag-manage ng verification (optional)
+// Admin commands for managing verification (optional)
 client.on(Events.MessageCreate, async (message) => {
-  // I-process lang ang commands mula sa admins
+  // Only process commands from admins
   if (!message.member?.permissions.has(PermissionFlagsBits.Administrator)) return;
   
   if (message.content.startsWith('!verify')) {
@@ -140,7 +313,7 @@ client.on(Events.MessageCreate, async (message) => {
           await message.reply(`Manually verified ang user: ${mentionedUser.username}`);
         }
       } catch (error) {
-        console.error('Error sa manual verification ng user:', error);
+        console.error('Error manually verifying user:', error);
       }
     }
   }
@@ -158,9 +331,27 @@ client.on(Events.MessageCreate, async (message) => {
   
   if (message.content === '!verification-reset') {
     userShares.clear();
+    userCooldowns.clear();
     await message.reply('Nareset na ang verification tracking.');
+  }
+  
+  if (message.content.startsWith('!send-verification')) {
+    const mentionedUser = message.mentions.users.first();
+    if (mentionedUser) {
+      try {
+        const member = message.guild.members.cache.get(mentionedUser.id);
+        if (member) {
+          await sendVerificationMessage(member, message.channel);
+          await message.reply(`Sent verification message to ${mentionedUser.username}`);
+        }
+      } catch (error) {
+        console.error('Error sending verification message:', error);
+      }
+    } else {
+      await message.reply('Please mention a user to send the verification message to.');
+    }
   }
 });
 
-// Log in sa Discord gamit ang client token
+// Log in to Discord with client token
 client.login(process.env.DISCORD_TOKEN);
