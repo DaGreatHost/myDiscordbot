@@ -1,13 +1,15 @@
-# Discord Verification Bot
+# Discord Verification Bot with Telegram Sharing
 
-Ang bot na ito ay ginawa para i-verify ang mga bagong miyembro sa pamamagitan ng pag-require sa kanila na ibahagi ang invite link ng server ng tatlong beses.
+Ang bot na ito ay ginawa para i-verify ang mga bagong miyembro sa pamamagitan ng pag-require sa kanila na ibahagi ang invite link ng server sa Telegram ng tatlong beses.
 
 ## Features
 
-- Nag-retrack kung ilang beses ibinahagi ng bawat user ang server link
+- Nag-retrack kung ilang beses ibinahagi ng bawat user ang server link sa Telegram
+- Direct link para sa Telegram sharing (one-click sharing)
 - Nagpapadala ng progress updates pagkatapos ng bawat verification
 - May admin commands para sa manual verification at status checking
 - Nag-aannounce ng newly verified members sa welcome channel
+- Screenshot validation option para sa verification
 
 ## Setup Instructions
 
@@ -37,6 +39,7 @@ DISCORD_TOKEN=your_discord_bot_token_here
 ```javascript
 const config = {
   serverInviteLink: 'https://discord.gg/K5E9yRVr', // Palitan ng server link mo
+  telegramShareLink: 'https://t.me/share/url?url=https://discord.gg/K5E9yRVr&text=Join%20this%20awesome%20server!', // Palitan ng pre-formatted Telegram link mo
   requiredShares: 3, // Ilang beses kailangang ibahagi
   verificationChannelId: 'VERIFICATION_CHANNEL_ID', // Palitan ng ID ng iyong verification channel
   verifiedRoleId: 'VERIFIED_ROLE_ID', // Palitan ng ID ng iyong verified role
@@ -54,6 +57,21 @@ npm start
 - `!verify @user` - Manual na pag-verify sa isang user
 - `!verification-status` - Tingnan ang verification progress ng lahat ng users
 - `!verification-reset` - I-reset ang lahat ng verification tracking
+- `!send-verification @user` - Magpadala ng verification message sa specific user
+
+## Pag-customize ng Telegram Share Link
+
+Para i-customize ang Telegram share link, sundin ang format na ito:
+```
+https://t.me/share/url?url=YOUR_DISCORD_INVITE_LINK&text=YOUR_CUSTOM_MESSAGE
+```
+
+Halimbawa:
+```
+https://t.me/share/url?url=https://discord.gg/K5E9yRVr&text=Join%20this%20awesome%20server!
+```
+
+Tandaan na kailangan mong i-encode ang mga special characters sa message. Ang spaces ay dapat maging `%20`, atbp.
 
 ## Pag-deploy sa Railway
 
