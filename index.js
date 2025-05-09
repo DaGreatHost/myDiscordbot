@@ -1,4 +1,4 @@
-// Discord Verification Bot - With Interactive Buttons
+// Discord Verification Bot - With Telegram Sharing
 // Using Discord.js v14
 const { Client, GatewayIntentBits, PermissionFlagsBits, Events, EmbedBuilder, 
   ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
@@ -18,6 +18,7 @@ const client = new Client({
 // Configuration
 const config = {
   serverInviteLink: 'https://discord.gg/K5E9yRVr', // Your server link
+  telegramShareLink: 'https://t.me/share/url?url=https://discord.gg/K5E9yRVr&text=Join%20this%20awesome%20server!', // Pre-formatted Telegram share link
   requiredShares: 3, // How many times users need to share the link
   verificationChannelId: '1370259139153887252', // Replace with your verification channel ID
   verifiedRoleId: '1370259899350782024', // Replace with your verified role ID
@@ -32,7 +33,7 @@ const userCooldowns = new Map();
 // Bot ready event
 client.once(Events.ClientReady, () => {
   console.log(`Logged in as ${client.user.tag}`);
-  console.log('Verification bot with interactive buttons is ready!');
+  console.log('Verification bot with Telegram sharing is ready!');
 });
 
 // When a new member joins the server
@@ -53,7 +54,7 @@ client.on(Events.GuildMemberAdd, async (member) => {
   }
 });
 
-// Function to send verification message with button
+// Function to send verification message with buttons
 async function sendVerificationMessage(member, channel) {
   const userId = member.id;
   const currentShares = userShares.get(userId) || 0;
@@ -61,10 +62,9 @@ async function sendVerificationMessage(member, channel) {
   const embed = new EmbedBuilder()
     .setColor(0x0099FF)
     .setTitle('Welcome sa Server!')
-    .setDescription(`Welcome, ${member.user.username}! Para magkaroon ng full access sa server na ito, kailangan mong ibahagi ang invite link namin **${config.requiredShares} beses** sa iba.`)
+    .setDescription(`Welcome, ${member.user.username}! Para magkaroon ng full access sa server na ito, kailangan mong ibahagi ang invite link namin **${config.requiredShares} beses** sa Telegram.`)
     .addFields(
-      { name: 'Mga Instructions', value: '1. Click ang "Share Link" button sa ibaba\n2. Ibahagi ito sa mga kaibigan o sa ibang communities\n3. Click ulit ang button pagkatapos ibahagi\n4. Kapag na-verify ka na, makakakuha ka na ng full access sa server!' },
-      { name: 'Server Invite Link', value: config.serverInviteLink },
+      { name: 'Mga Instructions', value: '1. Click ang "Share sa Telegram" button sa ibaba\n2. Ibahagi ang link sa mga Telegram groups o friends mo\n3. Click ang "I Shared on Telegram" button pagkatapos mong mag-share\n4. Ulitin ito ng '+config.requiredShares+' beses\n5. Kapag na-verify ka na, makakakuha ka na ng full access sa server!' },
       { name: 'Progress', value: `${currentShares}/${config.requiredShares} shares` }
     )
     .setTimestamp();
@@ -73,13 +73,17 @@ async function sendVerificationMessage(member, channel) {
   const row = new ActionRowBuilder()
     .addComponents(
       new ButtonBuilder()
-        .setCustomId(`share_${userId}`)
-        .setLabel(`Share Link (${currentShares}/${config.requiredShares})`)
-        .setStyle(ButtonStyle.Primary)
+        .setLabel(`Share sa Telegram`)
+        .setStyle(ButtonStyle.Link)
+        .setURL(config.telegramShareLink)
         .setEmoji('🔗'),
       new ButtonBuilder()
+        .setCustomId(`share_confirm_${userId}`)
+        .setLabel(`I Shared on Telegram (${currentShares}/${config.requiredShares})`)
+        .setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
         .setCustomId(`manual_verify_${userId}`)
-        .setLabel('I already shared (Show screenshot)')
+        .setLabel('Show Screenshot Proof')
         .setStyle(ButtonStyle.Secondary)
     );
   
@@ -153,13 +157,17 @@ async function updateVerificationProgress(interaction, userId) {
       const row = new ActionRowBuilder()
         .addComponents(
           new ButtonBuilder()
-            .setCustomId(`share_${userId}`)
-            .setLabel(`Share Link (${newShareCount}/${config.requiredShares})`)
-            .setStyle(ButtonStyle.Primary)
+            .setLabel(`Share sa Telegram`)
+            .setStyle(ButtonStyle.Link)
+            .setURL(config.telegramShareLink)
             .setEmoji('🔗'),
           new ButtonBuilder()
+            .setCustomId(`share_confirm_${userId}`)
+            .setLabel(`I Shared on Telegram (${newShareCount}/${config.requiredShares})`)
+            .setStyle(ButtonStyle.Primary),
+          new ButtonBuilder()
             .setCustomId(`manual_verify_${userId}`)
-            .setLabel('I already shared (Show screenshot)')
+            .setLabel('Show Screenshot Proof')
             .setStyle(ButtonStyle.Secondary)
         );
       
@@ -183,9 +191,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
   
   const customId = interaction.customId;
   
-  // Handle share button
-  if (customId.startsWith('share_')) {
-    const userId = customId.split('_')[1];
+  // Handle share confirmation button
+  if (customId.startsWith('share_confirm_')) {
+    const userId = customId.split('_')[2];
     
     // Only allow the owner of the button to use it
     if (interaction.user.id !== userId) {
@@ -195,9 +203,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
       });
     }
     
-    // First, reply with the server invite link for easy copying
     await interaction.reply({ 
-      content: `Ito ang invite link na pwede mong i-share: ${config.serverInviteLink}\n\nPagkatapos ibahagi, click ulit ang button para ma-update ang progress mo.`,
+      content: `Salamat sa pag-share sa Telegram! Ina-update ang verification progress mo...`,
       ephemeral: true
     });
     
@@ -218,7 +225,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     }
     
     await interaction.reply({ 
-      content: 'Mag-upload ng screenshot ng pagshare mo ng invite link sa ibang community o sa kaibigan mo dito sa channel na ito.',
+      content: 'Mag-upload ng screenshot ng pagshare mo ng invite link sa Telegram. I-send dito sa channel na ito para ma-verify ng admin.',
       ephemeral: true
     });
   }
@@ -298,7 +305,7 @@ client.on(Events.MessageCreate, async (message) => {
   }
 });
 
-// Admin commands for managing verification (optional)
+// Admin commands for managing verification
 client.on(Events.MessageCreate, async (message) => {
   // Only process commands from admins
   if (!message.member?.permissions.has(PermissionFlagsBits.Administrator)) return;
