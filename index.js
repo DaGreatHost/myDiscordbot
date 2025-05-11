@@ -1,8 +1,7 @@
-// Discord Verification Bot - Kailangan ibahagi ng users ang server link ng 3 beses
-// Gumagamit ng Discord.js v14
-const { Client, GatewayIntentBits, PermissionFlagsBits, Events, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
-const fs = require('fs');
-const path = require('path');
+// Discord Verification Bot - With Telegram Sharing
+// Using Discord.js v14
+const { Client, GatewayIntentBits, PermissionFlagsBits, Events, EmbedBuilder, 
+  ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 require('dotenv').config();
 
 // Create a new client instance
@@ -18,108 +17,74 @@ const client = new Client({
 
 // Configuration
 const config = {
-  serverInviteLink: 'https://discord.gg/K5E9yRVr', // Ang server link mo
-  requiredShares: 3, // Ilang beses kailangang ibahagi ng users ang link
-  verificationChannelId: '1370259139153887252', // Palitan mo ito ng ID ng verification channel mo
-  verifiedRoleId: '1370259899350782024', // Palitan mo ito ng ID ng verified role mo
-  welcomeChannelId: '1370265673455898706', // Palitan mo ito ng ID ng welcome channel mo
-  telegramLink: 'https://t.me/VlPcontentbot?startapp=Product' // Ang Telegram link mo
+  serverInviteLink: 'https://discord.gg/K5E9yRVr', // Your server link
+  telegramShareLink: 'https://t.me/share/url?url=https://discord.gg/K5E9yRVr&text=Join%20this%20awesome%20server!', // Pre-formatted Telegram share link
+  telegramProductLink: 'https://t.me/VlPcontentbot?startapp=Product', // Product link to share when users chat
+  requiredShares: 3, // How many times users need to share the link
+  verificationChannelId: '1370259139153887252', // Replace with your verification channel ID
+  verifiedRoleId: '1370259899350782024', // Replace with your verified role ID
+  welcomeChannelId: '1370265673455898706', // Replace with your welcome channel ID
+  cooldownTime: 60000 // Cooldown in milliseconds (1 minute) between shares to prevent spam
 };
 
-// Database file path
-const DB_PATH = path.join(__dirname, 'user_shares.json');
+// Database to track user shares (in a production app, use a proper database)
+const userShares = new Map();
+const userCooldowns = new Map();
+// Track message cooldowns to prevent spam
+const messageCooldowns = new Map();
+const MESSAGE_COOLDOWN = 10000; // 10 seconds between auto-replies
 
-// Load database or create if not exists
-let userShares = {};
-try {
-  if (fs.existsSync(DB_PATH)) {
-    const data = fs.readFileSync(DB_PATH, 'utf8');
-    userShares = JSON.parse(data);
-    console.log('Database loaded successfully');
-  } else {
-    // Create empty database file
-    fs.writeFileSync(DB_PATH, JSON.stringify({}), 'utf8');
-    console.log('New database file created');
-  }
-} catch (error) {
-  console.error('Error loading database:', error);
-}
+// Error handling - add general error handlers to prevent crashes
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught Exception:', error);
+});
 
-// Function to save database
-function saveDatabase() {
-  try {
-    fs.writeFileSync(DB_PATH, JSON.stringify(userShares, null, 2), 'utf8');
-  } catch (error) {
-    console.error('Error saving database:', error);
-  }
-}
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+});
 
 // Bot ready event
 client.once(Events.ClientReady, () => {
   console.log(`Logged in as ${client.user.tag}`);
-  console.log('Verification bot is ready!');
-});
-
-// Send VIP product message via DM instead of public reply
-client.on(Events.MessageCreate, async (message) => {
-  // Skip bot messages, verification channel messages, and DMs
-  if (message.author.bot) return;
-  if (message.channel.id === config.verificationChannelId) return;
-  if (message.channel.type === 1) return; // Skip if already in DM to prevent loops
+  console.log('Verification bot with Telegram sharing is ready!');
   
-  try {
-    // Create embed for DM
-    const dmEmbed = new EmbedBuilder()
-      .setColor(0xFF0099)
-      .setTitle('𝐕𝐈𝐏 𝐏𝐑𝐎𝐃𝐔𝐂𝐓 𝐀𝐕𝐀𝐈𝐋𝐀𝐁𝐋𝐄!')
-      .setDescription(`Hello ${message.author.username}! AVAIL KANA BABY 𝐕𝐈𝐏 𝐏𝐑𝐎𝐃𝐔𝐂𝐓!`)
-      .setTimestamp();
-    
-    // Create VIP button for DM
-    const dmRow = new ActionRowBuilder()
-      .addComponents(
-        new ButtonBuilder()
-          .setLabel('GET VIP ACCESS NOW')
-          .setStyle(ButtonStyle.Success)
-          .setURL(config.telegramLink)
-      );
-    
-    // Send DM to user with embed and button
-    await message.author.send({ 
-      embeds: [dmEmbed],
-      components: [dmRow]
-    });
-    
-    // Store in database that we sent this user a DM to avoid spamming
-    // We'll track the last time we sent a DM to this user
-    userShares[`dm_${message.author.id}`] = Date.now();
-    saveDatabase();
-    
-  } catch (error) {
-    console.error('Error sending DM to user:', error);
-    // Some users have DMs closed, we'll just ignore the error
-  }
+  // Set bot activity
+  client.user.setActivity('Verifying Members', { type: 'WATCHING' });
 });
 
-// Kapag may bagong miyembro na sumali sa server
+// When a new member joins the server
 client.on(Events.GuildMemberAdd, async (member) => {
   try {
-    // Short message sa verification channel
+    // Send welcome message and instructions to verification channel
     const verificationChannel = member.guild.channels.cache.get(config.verificationChannelId);
     
     if (verificationChannel) {
-      await verificationChannel.send(`Welcome <@${member.id}>! Please check your DMs for verification instructions.`);
+      await sendVerificationMessage(member, verificationChannel);
+    } else {
+      console.error(`Verification channel with ID ${config.verificationChannelId} not found`);
     }
     
-    // Send detailed welcome and instructions via DM
+    // Initialize user in tracking system
+    userShares.set(member.id, 0);
+    
+  } catch (error) {
+    console.error('Error handling new member:', error);
+  }
+});
+
+// Function to send verification message with buttons
+async function sendVerificationMessage(member, channel) {
+  try {
+    const userId = member.id;
+    const currentShares = userShares.get(userId) || 0;
+    
     const embed = new EmbedBuilder()
       .setColor(0x0099FF)
       .setTitle('Welcome sa Server!')
-      .setDescription(`Welcome, ${member.user.username}! Para magkaroon ng full access sa server na ito, kailangan mong ibahagi ang invite link namin **${config.requiredShares} beses** sa iba.`)
+      .setDescription(`Welcome, ${member.user.username}! Para magkaroon ng full access sa server na ito, kailangan mong ibahagi ang invite link namin **${config.requiredShares} beses** sa Telegram.`)
       .addFields(
-        { name: 'Mga Instructions', value: '1. Kopyahin ang server invite link sa ibaba\n2. Ibahagi ito sa mga kaibigan o sa ibang communities\n3. Magpadala ng screenshots ng iyong shares sa verification channel\n4. Kapag na-verify ka na, makakakuha ka na ng full access sa server!' },
-        { name: 'Server Invite Link', value: config.serverInviteLink },
-        { name: 'VIP Product', value: `AVAIL KANA BABY 𝐕𝐈𝐏 𝐏𝐑𝐎𝐃𝐔𝐂𝐓 : 👉 ${config.telegramLink}` }
+        { name: 'Mga Instructions', value: '1. Click ang "Share sa Telegram" button sa ibaba\n2. Ibahagi ang link sa mga Telegram groups o friends mo\n3. Click ang "I Shared on Telegram" button pagkatapos mong mag-share\n4. Ulitin ito ng '+config.requiredShares+' beses\n5. Kapag na-verify ka na, makakakuha ka na ng full access sa server!' },
+        { name: 'Progress', value: `${currentShares}/${config.requiredShares} shares` }
       )
       .setTimestamp();
     
@@ -127,293 +92,397 @@ client.on(Events.GuildMemberAdd, async (member) => {
     const row = new ActionRowBuilder()
       .addComponents(
         new ButtonBuilder()
-          .setLabel('Copy Invite Link')
-          .setStyle(ButtonStyle.Primary)
-          .setCustomId('copy_invite'),
+          .setLabel(`Share sa Telegram`)
+          .setStyle(ButtonStyle.Link)
+          .setURL(config.telegramShareLink)
+          .setEmoji('🔗'),
         new ButtonBuilder()
-          .setLabel('VIP Product')
-          .setStyle(ButtonStyle.Success)
-          .setURL(config.telegramLink)
+          .setCustomId(`share_confirm_${userId}`)
+          .setLabel(`I Shared on Telegram (${currentShares}/${config.requiredShares})`)
+          .setStyle(ButtonStyle.Primary),
+        new ButtonBuilder()
+          .setCustomId(`manual_verify_${userId}`)
+          .setLabel('Show Screenshot Proof')
+          .setStyle(ButtonStyle.Secondary)
       );
     
-    try {
-      await member.send({ 
-        embeds: [embed],
-        components: [row] 
-      });
-    } catch (error) {
-      console.error('Error sending DM to new member:', error);
-      // If DM fails, send full message in verification channel
-      if (verificationChannel) {
-        await verificationChannel.send({ 
-          content: `<@${member.id}>`, 
-          embeds: [embed],
-          components: [row] 
-        });
-      }
-    }
-    
-    // I-initialize ang user sa tracking system
-    userShares[member.id] = 0;
-    saveDatabase();
-    
-  } catch (error) {
-    console.error('Error sa pag-handle ng bagong miyembro:', error);
-  }
-});
-
-// Handle button interactions
-client.on(Events.InteractionCreate, async (interaction) => {
-  if (!interaction.isButton()) return;
-  
-  if (interaction.customId === 'copy_invite') {
-    await interaction.reply({
-      content: `${config.serverInviteLink}`,
-      ephemeral: true
+    await channel.send({ 
+      content: `<@${userId}>`, 
+      embeds: [embed],
+      components: [row]
     });
+  } catch (error) {
+    console.error('Error sending verification message:', error);
   }
-});
+}
 
-// I-process ang mga messages sa verification channel
-client.on(Events.MessageCreate, async (message) => {
-  // I-ignore ang bot messages
-  if (message.author.bot) return;
-  
-  // I-process lang ang mga messages sa verification channel
-  if (message.channel.id !== config.verificationChannelId) return;
-  
-  // I-check kung may image/screenshot ang message
-  const hasImage = message.attachments.size > 0 && 
-    message.attachments.some(attachment => 
-      attachment.contentType?.startsWith('image/'));
-  
-  // I-check kung ang message ay naglalaman ng server link o may image (screenshot)
-  if (message.content.includes(config.serverInviteLink) || hasImage) {
-    // Kunin ang current share count para sa user
-    const userId = message.author.id;
-    const currentShares = userShares[userId] || 0;
+// Update progress for a user
+async function updateVerificationProgress(interaction, userId) {
+  try {
+    // Get current share count for user
+    const currentShares = userShares.get(userId) || 0;
     const newShareCount = currentShares + 1;
     
-    // I-update ang share count
-    userShares[userId] = newShareCount;
+    // Check cooldown
+    const lastShareTime = userCooldowns.get(userId) || 0;
+    const now = Date.now();
     
-    // Send a DM to the user with VIP promotion
-    try {
-      // Create embed for DM
-      const shareEmbed = new EmbedBuilder()
-        .setColor(0xFF0099)
-        .setTitle('Verification Progress')
-        .setDescription(`Salamat ${message.author.username}! Naibahagi mo na ang aming server link ${newShareCount}/${config.requiredShares} beses.`)
-        .addFields(
-          { name: 'Natitira', value: `Ibahagi mo pa ng ${config.requiredShares - newShareCount} beses para ma-verify.` },
-          { name: '𝐕𝐈𝐏 𝐏𝐑𝐎𝐃𝐔𝐂𝐓', value: `AVAIL KANA BABY 𝐕𝐈𝐏 𝐏𝐑𝐎𝐃𝐔𝐂𝐓 : 👉 ${config.telegramLink}` }
-        )
-        .setTimestamp();
-      
-      // Create buttons for DM
-      const dmRow = new ActionRowBuilder()
-        .addComponents(
-          new ButtonBuilder()
-            .setLabel('Copy Invite Link')
-            .setStyle(ButtonStyle.Primary)
-            .setCustomId('copy_invite'),
-          new ButtonBuilder()
-            .setLabel('GET VIP ACCESS NOW')
-            .setStyle(ButtonStyle.Success)
-            .setURL(config.telegramLink)
-        );
-      
-      await message.author.send({ 
-        embeds: [shareEmbed],
-        components: [dmRow]
+    if (now - lastShareTime < config.cooldownTime) {
+      const remainingTime = Math.ceil((config.cooldownTime - (now - lastShareTime)) / 1000);
+      return await interaction.reply({ 
+        content: `Masyado kang mabilis mag-share! Maghintay ka ng ${remainingTime} seconds bago mag-share ulit.`,
+        ephemeral: true
       });
-    } catch (error) {
-      console.error('Error sending share verification DM:', error);
-      // Some users have DMs closed, we'll just continue
     }
     
-    saveDatabase();
+    // Update share count
+    userShares.set(userId, newShareCount);
+    userCooldowns.set(userId, now);
     
     if (newShareCount >= config.requiredShares) {
-      // Natugunan na ng user ang requirement, bigyan siya ng access
-      try {
-        const member = message.guild.members.cache.get(userId);
-        if (member) {
-          // I-add ang verified role
+      // User has met the requirement, give them access
+      const member = interaction.guild.members.cache.get(userId);
+      if (member) {
+        try {
+          // Add the verified role
           await member.roles.add(config.verifiedRoleId);
           
-                      // Magpadala ng success message sa DM
+          // Send success message
           const successEmbed = new EmbedBuilder()
             .setColor(0x00FF00)
             .setTitle('Verification Complete!')
-            .setDescription(`Congratulations ${message.author.username}! Matagumpay kang na-verify at mayroon ka na ngayong full access sa server.`)
-            .addFields(
-              { name: 'VIP Product', value: `AVAIL KANA BABY 𝐕𝐈𝐏 𝐏𝐑𝐎𝐃𝐔𝐂𝐓 : 👉 ${config.telegramLink}` }
-            )
+            .setDescription(`Congratulations ${member.user.username}! Matagumpay kang na-verify at mayroon ka na ngayong full access sa server.`)
             .setTimestamp();
           
-          // Create VIP button
-          const row = new ActionRowBuilder()
-            .addComponents(
-              new ButtonBuilder()
-                .setLabel('GET VIP ACCESS NOW')
-                .setStyle(ButtonStyle.Success)
-                .setURL(config.telegramLink)
-            );
+          await interaction.update({ 
+            embeds: [successEmbed],
+            components: [] // Remove buttons after verification
+          });
           
-          // Send a brief confirmation in the channel
-          await message.reply("✅ Verification complete! Check your DM for VIP access.");
-          
-          // Send detailed message via DM
-          try {
-            await message.author.send({ 
-              embeds: [successEmbed],
-              components: [row]
-            });
-          } catch (error) {
-            console.error('Error sending success verification DM:', error);
-            // If DM fails, send in channel instead
-            await message.reply({ 
-              embeds: [successEmbed],
-              components: [row]
-            });
-          }
-          
-          // Magpadala ng welcome message sa welcome channel
-          const welcomeChannel = message.guild.channels.cache.get(config.welcomeChannelId);
+          // Send welcome message to welcome channel
+          const welcomeChannel = interaction.guild.channels.cache.get(config.welcomeChannelId);
           if (welcomeChannel) {
-            const welcomeEmbed = new EmbedBuilder()
-              .setColor(0x00FF00)
-              .setTitle('New Verified Member!')
-              .setDescription(`Welcome sa server, <@${userId}>! Salamat sa pagtulong sa pag-grow ng community namin.`)
-              .addFields(
-                { name: 'VIP Product', value: `AVAIL KANA BABY 𝐕𝐈𝐏 𝐏𝐑𝐎𝐃𝐔𝐂𝐓 : 👉 ${config.telegramLink}` }
-              );
-            
-            const welcomeRow = new ActionRowBuilder()
-              .addComponents(
-                new ButtonBuilder()
-                  .setLabel('GET VIP ACCESS NOW')
-                  .setStyle(ButtonStyle.Success)
-                  .setURL(config.telegramLink)
-              );
-            
-            await welcomeChannel.send({ 
-              content: `<@${userId}>`,
-              embeds: [welcomeEmbed],
-              components: [welcomeRow]
-            });
+            await welcomeChannel.send(`Welcome sa server, <@${userId}>! Salamat sa pagtulong sa pag-grow ng community namin.`);
+          } else {
+            console.error(`Welcome channel with ID ${config.welcomeChannelId} not found`);
           }
+        } catch (roleError) {
+          console.error('Error adding role to user:', roleError);
+          // Reply with error message but don't throw the error
+          await interaction.followUp({ 
+            content: 'Error adding verified role. Please contact an admin.',
+            ephemeral: true
+          });
         }
-      } catch (error) {
-        console.error('Error sa pagbibigay ng access sa verified user:', error);
       }
     } else {
-      // I-update ang user sa kanyang progress
+      // Update user on their progress
       const progressEmbed = new EmbedBuilder()
         .setColor(0xFFA500)
         .setTitle('Verification Progress')
-        .setDescription(`Salamat ${message.author.username}! Naibahagi mo na ang aming server link ${newShareCount}/${config.requiredShares} beses.`)
+        .setDescription(`Salamat ${interaction.user.username}! Naibahagi mo na ang aming server link ${newShareCount}/${config.requiredShares} beses.`)
         .addFields(
-          { name: 'Natitira', value: `Ibahagi mo pa ng ${config.requiredShares - newShareCount} beses para ma-verify.` },
-          { name: 'VIP Product', value: `AVAIL KANA BABY 𝐕𝐈𝐏 𝐏𝐑𝐎𝐃𝐔𝐂𝐓 : 👉 ${config.telegramLink}` }
+          { name: 'Natitira', value: `Ibahagi mo pa ng ${config.requiredShares - newShareCount} beses para ma-verify.` }
         )
         .setTimestamp();
       
-      // Create progress buttons
+      // Update button with new count
       const row = new ActionRowBuilder()
         .addComponents(
           new ButtonBuilder()
-            .setLabel('Copy Invite Link')
-            .setStyle(ButtonStyle.Primary)
-            .setCustomId('copy_invite'),
+            .setLabel(`Share sa Telegram`)
+            .setStyle(ButtonStyle.Link)
+            .setURL(config.telegramShareLink)
+            .setEmoji('🔗'),
           new ButtonBuilder()
-            .setLabel('GET VIP ACCESS')
-            .setStyle(ButtonStyle.Success)
-            .setURL(config.telegramLink)
+            .setCustomId(`share_confirm_${userId}`)
+            .setLabel(`I Shared on Telegram (${newShareCount}/${config.requiredShares})`)
+            .setStyle(ButtonStyle.Primary),
+          new ButtonBuilder()
+            .setCustomId(`manual_verify_${userId}`)
+            .setLabel('Show Screenshot Proof')
+            .setStyle(ButtonStyle.Secondary)
         );
       
-      // Send a brief confirmation in the channel
-      await message.reply(`✅ Progress updated! (${newShareCount}/${config.requiredShares}) Check your DM for more details.`);
+      await interaction.update({ 
+        embeds: [progressEmbed],
+        components: [row]
+      });
+    }
+  } catch (error) {
+    console.error('Error updating verification progress:', error);
+    // Try to reply if we can, but don't throw another error if this fails
+    try {
+      await interaction.followUp({ 
+        content: 'May error na nangyari. Please try again.',
+        ephemeral: true
+      });
+    } catch (replyError) {
+      console.error('Error replying to interaction:', replyError);
+    }
+  }
+}
+
+// Handle button interactions
+client.on(Events.InteractionCreate, async (interaction) => {
+  try {
+    if (!interaction.isButton()) return;
+    
+    const customId = interaction.customId;
+    
+    // Handle share confirmation button
+    if (customId.startsWith('share_confirm_')) {
+      const userId = customId.split('_')[2];
       
-      // We already sent a DM in the earlier code block, so no need to send another one here
-    }
-  }
-});
-
-// Admin commands para sa pag-manage ng verification
-client.on(Events.MessageCreate, async (message) => {
-  // I-process lang ang commands mula sa admins
-  if (!message.member?.permissions.has(PermissionFlagsBits.Administrator)) return;
-  
-  if (message.content.startsWith('!verify')) {
-    const mentionedUser = message.mentions.users.first();
-    if (mentionedUser) {
+      // Only allow the owner of the button to use it
+      if (interaction.user.id !== userId) {
+        return await interaction.reply({ 
+          content: 'Hindi mo pwedeng gamitin ang button na ito dahil hindi ito para sa iyo.',
+          ephemeral: true
+        });
+      }
+      
+      await interaction.deferReply({ ephemeral: true });
+      
       try {
-        const member = message.guild.members.cache.get(mentionedUser.id);
-        if (member) {
-          await member.roles.add(config.verifiedRoleId);
-          
-          const adminVerifyEmbed = new EmbedBuilder()
-            .setColor(0x00FF00)
-            .setTitle('Manual Verification')
-            .setDescription(`Manually verified ang user: ${mentionedUser.username}`)
-            .setTimestamp();
-          
-          await message.reply({ embeds: [adminVerifyEmbed] });
-        }
+        await interaction.editReply({ 
+          content: `Salamat sa pag-share sa Telegram! Ina-update ang verification progress mo...`,
+          ephemeral: true
+        });
+        
+        // Update the verification progress
+        await updateVerificationProgress(interaction, userId);
       } catch (error) {
-        console.error('Error sa manual verification ng user:', error);
-      }
-    }
-  }
-  
-  if (message.content === '!verification-status') {
-    let statusEmbed = new EmbedBuilder()
-      .setColor(0x0099FF)
-      .setTitle('Verification Status')
-      .setTimestamp();
-    
-    let statusText = '';
-    for (const [userId, shareCount] of Object.entries(userShares)) {
-      try {
-        const user = await client.users.fetch(userId).catch(() => null);
-        if (user) {
-          statusText += `${user.username}: ${shareCount}/${config.requiredShares} shares\n`;
+        console.error('Error handling share confirmation:', error);
+        // Try to reply if possible
+        try {
+          await interaction.editReply({ 
+            content: 'Error updating your verification progress. Please try again later.',
+            ephemeral: true
+          });
+        } catch (replyError) {
+          console.error('Failed to reply to interaction:', replyError);
         }
-      } catch {
-        // Skip user if can't fetch
       }
     }
     
-    statusEmbed.setDescription(statusText || 'No verification data available.');
-    await message.reply({ embeds: [statusEmbed] });
+    // Handle manual verification button (for screenshot method)
+    if (customId.startsWith('manual_verify_')) {
+      const userId = customId.split('_')[2];
+      
+      // Only allow the owner of the button to use it
+      if (interaction.user.id !== userId) {
+        return await interaction.reply({ 
+          content: 'Hindi mo pwedeng gamitin ang button na ito dahil hindi ito para sa iyo.',
+          ephemeral: true
+        });
+      }
+      
+      await interaction.reply({ 
+        content: 'Mag-upload ng screenshot ng pagshare mo ng invite link sa Telegram. I-send dito sa channel na ito para ma-verify ng admin.',
+        ephemeral: true
+      });
+    }
+  } catch (error) {
+    console.error('Error handling interaction:', error);
   }
-  
-  if (message.content === '!verification-reset') {
-    userShares = {};
-    saveDatabase();
+});
+
+// Process messages in verification channel for manual verification (screenshots)
+client.on(Events.MessageCreate, async (message) => {
+  try {
+    // Ignore bot messages
+    if (message.author.bot) return;
     
-    const resetEmbed = new EmbedBuilder()
-      .setColor(0xFF0000)
-      .setTitle('Verification Reset')
-      .setDescription('Nareset na ang verification tracking.')
-      .setTimestamp();
+    // Auto-reply to any message with the product link
+    await handleAutoReply(message);
     
-    await message.reply({ embeds: [resetEmbed] });
+    // Only process verification messages in verification channel
+    if (message.channel.id !== config.verificationChannelId) return;
+    
+    // Check if message has an image/screenshot
+    const hasImage = message.attachments.size > 0 && 
+      message.attachments.some(attachment => 
+        attachment.contentType?.startsWith('image/'));
+    
+    if (hasImage) {
+      // Get current share count for user
+      const userId = message.author.id;
+      const currentShares = userShares.get(userId) || 0;
+      const newShareCount = currentShares + 1;
+      
+      // Check cooldown
+      const lastShareTime = userCooldowns.get(userId) || 0;
+      const now = Date.now();
+      
+      if (now - lastShareTime < config.cooldownTime) {
+        const remainingTime = Math.ceil((config.cooldownTime - (now - lastShareTime)) / 1000);
+        return await message.reply(`Masyado kang mabilis mag-share! Maghintay ka ng ${remainingTime} seconds bago mag-share ulit.`);
+      }
+      
+      // Update share count
+      userShares.set(userId, newShareCount);
+      userCooldowns.set(userId, now);
+      
+      if (newShareCount >= config.requiredShares) {
+        // User has met the requirement, give them access
+        try {
+          const member = message.guild.members.cache.get(userId);
+          if (member) {
+            try {
+              // Add the verified role
+              await member.roles.add(config.verifiedRoleId);
+              
+              // Send success message
+              const successEmbed = new EmbedBuilder()
+                .setColor(0x00FF00)
+                .setTitle('Verification Complete!')
+                .setDescription(`Congratulations ${message.author.username}! Matagumpay kang na-verify at mayroon ka na ngayong full access sa server.`)
+                .setTimestamp();
+              
+              await message.reply({ embeds: [successEmbed] });
+              
+              // Send welcome message to welcome channel
+              const welcomeChannel = message.guild.channels.cache.get(config.welcomeChannelId);
+              if (welcomeChannel) {
+                await welcomeChannel.send(`Welcome sa server, <@${userId}>! Salamat sa pagtulong sa pag-grow ng community namin.`);
+              }
+            } catch (roleError) {
+              console.error('Error adding role:', roleError);
+              await message.reply('Error adding verified role. Please contact an admin.');
+            }
+          }
+        } catch (error) {
+          console.error('Error giving access to verified user:', error);
+        }
+      } else {
+        // Update user on their progress
+        const progressEmbed = new EmbedBuilder()
+          .setColor(0xFFA500)
+          .setTitle('Verification Progress')
+          .setDescription(`Salamat ${message.author.username}! Naibahagi mo na ang aming server link ${newShareCount}/${config.requiredShares} beses.`)
+          .addFields(
+            { name: 'Natitira', value: `Ibahagi mo pa ng ${config.requiredShares - newShareCount} beses para ma-verify.` }
+          )
+          .setTimestamp();
+        
+        await message.reply({ embeds: [progressEmbed] });
+      }
+    }
+  } catch (error) {
+    console.error('Error processing message:', error);
   }
 });
 
-// Add error handling for uncaught exceptions
-process.on('uncaughtException', (error) => {
-  console.error('Uncaught Exception:', error);
-  // Continue running the bot
+// Function to handle auto-reply with product link
+async function handleAutoReply(message) {
+  try {
+    // Skip if message is in verification channel (to avoid conflict with verification process)
+    if (message.channel.id === config.verificationChannelId) return;
+    
+    const userId = message.author.id;
+    const now = Date.now();
+    const lastMessageTime = messageCooldowns.get(userId) || 0;
+    
+    // Check if user is on cooldown
+    if (now - lastMessageTime < MESSAGE_COOLDOWN) return;
+    
+    // Set cooldown for this user
+    messageCooldowns.set(userId, now);
+    
+    // Reply with the product link
+    await message.reply(`AVAIL KANA BABY 𝐕𝐈𝐏 𝐏𝐑𝐎𝐃𝐔𝐂𝐓 : 👉\n${config.telegramProductLink}`);
+  } catch (error) {
+    console.error('Error sending auto-reply:', error);
+  }
+}
+
+// Admin commands for managing verification
+client.on(Events.MessageCreate, async (message) => {
+  try {
+    // Ignore bot messages
+    if (message.author.bot) return;
+    
+    // Only process commands from admins
+    if (!message.member?.permissions.has(PermissionFlagsBits.Administrator)) return;
+    
+    if (message.content.startsWith('!verify')) {
+      const mentionedUser = message.mentions.users.first();
+      if (mentionedUser) {
+        try {
+          const member = message.guild.members.cache.get(mentionedUser.id);
+          if (member) {
+            await member.roles.add(config.verifiedRoleId);
+            await message.reply(`Manually verified ang user: ${mentionedUser.username}`);
+          }
+        } catch (error) {
+          console.error('Error manually verifying user:', error);
+          await message.reply('Error verifying user. Please check roles and permissions.');
+        }
+      } else {
+        await message.reply('Please mention a user to verify.');
+      }
+    }
+    
+    if (message.content === '!verification-status') {
+      let statusMessage = '**Verification Status:**\n';
+      for (const [userId, shareCount] of userShares.entries()) {
+        try {
+          const user = await client.users.fetch(userId).catch(() => null);
+          if (user) {
+            statusMessage += `${user.username}: ${shareCount}/${config.requiredShares} shares\n`;
+          }
+        } catch (error) {
+          console.error('Error fetching user for status:', error);
+        }
+      }
+      await message.reply(statusMessage || 'No verification data to display.');
+    }
+    
+    if (message.content === '!verification-reset') {
+      userShares.clear();
+      userCooldowns.clear();
+      await message.reply('Nareset na ang verification tracking.');
+    }
+    
+    if (message.content.startsWith('!send-verification')) {
+      const mentionedUser = message.mentions.users.first();
+      if (mentionedUser) {
+        try {
+          const member = message.guild.members.cache.get(mentionedUser.id);
+          if (member) {
+            await sendVerificationMessage(member, message.channel);
+            await message.reply(`Sent verification message to ${mentionedUser.username}`);
+          }
+        } catch (error) {
+          console.error('Error sending verification message:', error);
+          await message.reply('Error sending verification message.');
+        }
+      } else {
+        await message.reply('Please mention a user to send the verification message to.');
+      }
+    }
+    
+    // New command to test the auto-reply
+    if (message.content === '!test-autoreply') {
+      await message.reply('Auto-reply test: Bot will now respond to the next message you send.');
+    }
+  } catch (error) {
+    console.error('Error processing admin command:', error);
+  }
 });
 
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
-  // Continue running the bot
+// Reconnection handling
+client.on('disconnect', () => {
+  console.log('Bot disconnected. Attempting to reconnect...');
 });
 
-// Log in sa Discord gamit ang client token
-client.login(process.env.DISCORD_TOKEN);
+client.on('reconnecting', () => {
+  console.log('Bot reconnecting...');
+});
+
+// Log in to Discord with client token
+client.login(process.env.DISCORD_TOKEN).catch(error => {
+  console.error('Failed to login to Discord:', error);
+  process.exit(1); // Exit if we can't connect to Discord
+});
