@@ -19,7 +19,7 @@ const client = new Client({
 const config = {
   serverInviteLink: 'https://discord.gg/K5E9yRVr', // Your server link
   telegramShareLink: 'https://t.me/share/url?url=https://discord.gg/K5E9yRVr&text=Join%20this%20awesome%20server!', // Pre-formatted Telegram share link
-  telegramProductLink: 'https://t.me/urvipshopbot?startapp=product', // Product link to share when users chat
+  telegramProductLink: 'https://t.me/availvip1bot?startapp=AvailNow', // Product link to share when users chat
   requiredShares: 3, // How many times users need to share the link
   verificationChannelId: '1370259139153887252', // Replace with your verification channel ID
   verifiedRoleId: '1370259899350782024', // Replace with your verified role ID
